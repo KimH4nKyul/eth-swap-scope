@@ -1,8 +1,6 @@
-import { Injectable } from '@nestjs/common';
 import { ConfigService } from '../config/config.service';
 import { SwapSimulationInput } from '../domain/models/swap-simulation-input.model';
 
-@Injectable()
 export class SimulationStoreService {
   private readonly items: SwapSimulationInput[] = [];
 

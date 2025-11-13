@@ -24,6 +24,8 @@ MEV 전략(샌드위치, 아비트라지 등)을 실행하려면, 단순히 “�
 - 관련 풀의 on-chain 유동성 상태(reserves)를 조회해서
 - “이 트랜잭션 기준으로 시뮬레이션할 때 필요한 모든 데이터”를 한 번에 모은 구조체로 내보낸다.
 
+> 구현체는 NestJS가 아니라 **순수 Node.js(TypeScript) + Express + Socket.IO** 조합으로 동작하며, EVM 기반 MEV 아비트라지 봇의 “mempool 구독 → 데이터 정규화” 단계를 전담한다.
+
 ---
 
 ## 2. Problem Definition
@@ -207,7 +209,7 @@ type SwapSimulationInput = {
 - 타입 안정성 (TypeScript)
 - DEX/체인 확장 용이한 모듈 구조
 
-## 6. Architecture
+## 6. Architecture (Node.js Runtime)
 
 ```text
 +-----------------------------+
@@ -216,129 +218,116 @@ type SwapSimulationInput = {
               |
               v
 +-----------------------------+
-| MempoolModule               |
-|  - MempoolService           |
-|  - newPendingTransactions   |
+| EthersService               |  <-- wraps ethers.WebSocketProvider
 +-------------+---------------+
               |
               v
 +-----------------------------+
-| UniswapV2Module             |
-|  - UniswapV2DecoderService  |
-|  - UniswapV2PoolService     |
-|  - 스왑 메서드 판별         |
+| MempoolService              |  <-- subscribes newPendingTransactions
 +-------------+---------------+
               |
               v
 +-----------------------------+
-| SimulationInputModule       |
-|  - IntentBuilderService     |
-|  - SimulationInputService   |
+| UniswapV2 Stack             |
+|  - Decoder/Classifer        |
+|  - PoolDirectory/PoolState  |
+|  - Intent Builder           |
 +-------------+---------------+
               |
               v
 +-----------------------------+
-| ApiModule / GatewayModule   |
-|  - REST / WebSocket API     |
-|  - 다른 시스템에 제공       |
+| SimulationPipelineService   |
+|  - watch filters            |
+|  - reserve normalization    |
+|  - JSONL + in-memory store  |
++-------------+---------------+
+              |
+              v
 +-----------------------------+
-
+| ApiServer (Express + WS)    |
+|  - REST: /simulation-inputs |
+|  - Socket.IO: simulation    |
+|  - downstream MEV bots      |
++-----------------------------+
 ```
+
+모든 구성요소는 NestJS 대신 순수 Node.js/TypeScript 클래스로 연결된다.  
+이 구조는 EVM 기반 MEV 아비트라지/샌드위치 봇이 필요로 하는 “mempool 구독 → 트랜잭션 구조화 → 실시간 전달” 단계를 담당한다.
 
 ## 7. Project Structure 
 
 ```text
 eth-swap-scope/
   src/
-    app.module.ts
-
+    api/
+      server.ts                      # Express + Socket.IO
     config/
-      config.module.ts
-      config.service.ts       # RPC URL, Router 주소, 감시 풀/토큰
-
-    infra/
-      ethers.module.ts        # ethers Provider 등록
-      ethers.service.ts
-      logger.module.ts
-      logger.service.ts
-
+      config.service.ts              # RPC/Router/Factory/Watch 설정
     domain/
       models/
         swap-intent.model.ts
         swap-simulation-input.model.ts
-
+    infra/
+      ethers/ethers.service.ts       # ethers WebSocketProvider 래퍼
+      logger/logger.service.ts       # 단순 콘솔 로거
     mempool/
-      mempool.module.ts
-      mempool.service.ts      # newPendingTransactions 구독
-      mempool.listener.ts?    # 필요시 이벤트 리스너 역할
-
-    uniswap-v2/
-      uniswap-v2.module.ts
-      uniswap-v2.abi.json
-      uniswap-v2-decoder.service.ts   # input data 디코딩
-      uniswap-v2-classifier.service.ts# 스왑 메서드 판별
-      uniswap-v2-pool-directory.service.ts # pair 조회/캐시
-      uniswap-v2-pool-state.service.ts     # getReserves 래퍼
-      uniswap-v2.builder.ts                # SwapIntent 빌더
-
+      mempool.service.ts             # newPendingTransactions 구독
     simulation-input/
-      simulation-input.module.ts
-      simulation-input.service.ts  # SwapSimulationInput 생성
-
-    api/
-      api.module.ts
-      simulation.controller.ts     # REST API (예: GET /simulations/latest)
-      simulation.gateway.ts?       # WebSocket (옵션)
+      simulation-input.service.ts    # reserve normalize + 필터
+      simulation-pipeline.service.ts # Rx 파이프라인
+      simulation-file-writer.service.ts
+      simulation-store.service.ts
+      simulation-events.service.ts
+    uniswap-v2/
+      uniswap-v2.abi.json
+      uniswap-v2-decoder.service.ts
+      uniswap-v2-classifier.service.ts
+      uniswap-v2-pool-directory.service.ts
+      uniswap-v2-pool-state.service.ts
+      uniswap-v2.builder.ts
+    main.ts                          # 수동 부트스트랩
 
   package.json
   tsconfig.json
-  nest-cli.json
   README.md
-
 ```
 
-## 8. 8. Modules & Responsibilities
-### 8.1 ConfigModule
-- RPC URL, Uniswap V2 Router 주소
-- Factory 주소, 감시 풀/토큰 리스트(WATCHED_POOLS, WATCHED_TOKENS)
-- 환경 변수 → ConfigService로 주입
+## 8. Components & Responsibilities
 
-### 8.2 Infra (EthersModule)
-- ethers.providers.WebSocketProvider 생성
-- DI 토큰으로 Provider 등록 (예: ETH_WS_PROVIDER)
-- 다른 서비스에서 주입받아 사용
+### 8.1 ConfigService
+- `ETH_WS_URL`, `UNISWAP_V2_ROUTER`, `UNISWAP_V2_FACTORY` 등을 환경 변수에서 읽어온다.
+- `WATCHED_POOLS`, `WATCHED_TOKENS`를 콤마 구분 주소 목록으로 파싱해 감시 필터로 사용한다.
+- `SIMULATION_OUTPUT_FILE`, `MAX_RECENT_SIMULATIONS`, `PIPELINE_CONCURRENCY` 같은 런타임 파라미터를 중앙에서 관리한다.
 
-### 8.3 MempoolModule
-- MempoolService
-  - WebSocket eth_subscribe: newPendingTransactions 사용
-  - txHash 수신 시 eth_getTransactionByHash 호출
-  - UniswapV2Module 쪽으로 raw tx 전달 (예: RxJS Subject/Observable, EventEmitter, NestJS Event 시스템 등)
+### 8.2 Infra Layer
+- **LoggerService**: 간단한 콘솔 로깅 래퍼, `DEBUG=true`일 때만 debug 로그 출력.
+- **EthersService**: `ethers.WebSocketProvider`를 생성/관리하고, 종료 시 `destroy()`를 호출해 연결을 정리한다.
 
-### 8.4 UniswapV2Module
-- UniswapV2DecoderService
-  - Router ABI 로딩
-  - input data 디코딩
-- UniswapV2ClassifierService
-  - 스왑 메서드인지 여부 판단
-- UniswapV2PoolDirectoryService
-  - Factory.getPair() 래핑
-  - (옵션) pair 주소 캐싱
-- UniswapV2PoolStateService
-  - pair.getReserves() 호출
-- UniswapV2Builder
-  - 위 정보들을 종합해 SwapIntent 생성
+### 8.3 MempoolService
+- `provider.on('pending')`를 사용해 txHash 스트림을 구독한다.
+- 각 해시에 대해 `eth_getTransactionByHash`를 호출하고, RxJS `Subject`를 통해 downstream 파이프라인으로 전달한다.
 
-### 8.5 SimulationInputModule
-- SimulationInputService
-  - SwapIntent + pair reserves + 메타데이터를 받아 SwapSimulationInput 생성
-  - reserve0/1 → reserveIn/out을 스왑 방향에 맞게 정규화
-  - fee.rate = 0.003 세팅
+### 8.4 Uniswap V2 Stack
+- **UniswapV2DecoderService**: Router ABI(JSON 모듈)를 사용해 콜데이터를 디코딩.
+- **UniswapV2ClassifierService**: 지원하는 스왑 메서드(`swapExactTokensForTokens`, `swapTokensForExactTokens`, `swapExactETHForTokens`, `swapExactTokensForETH`)인지 판별하고 핵심 파라미터를 추출.
+- **UniswapV2PoolDirectoryService**: Factory `getPair` 호출을 래핑하고 주소를 캐싱.
+- **UniswapV2PoolStateService**: Pair 컨트랙트의 `token0/1`, `getReserves` 값을 조회해 `PairState` 구성.
+- **UniswapV2Builder**: 위 서비스들과 Config 정보를 묶어 `SwapIntent` 구조체를 만든다.
 
-### 8.6 ApiModule / GatewayModule
-- SimulationController
-  - 예: GET /simulation-inputs/recent
-- (옵션) SimulationGateway
-  - WebSocket으로 실시간 SwapSimulationInput push
+### 8.5 Simulation Pipeline
+- **SimulationInputService**: watch 리스트 필터링, reserve 정규화, 메타데이터(gasPrice/value) 세팅.
+- **SimulationPipelineService**: RxJS `mergeMap` 기반 파이프라인으로 Intent → SimulationInput → 저장/전달 과정을 처리.
+- **SimulationStoreService**: 최근 N개의 결과를 in-memory ring buffer로 유지 (`MAX_RECENT_SIMULATIONS`).
+- **SimulationFileWriterService**: JSONL 파일에 append하여 다른 시스템이 tail 할 수 있게 한다.
+- **SimulationEventsService**: WebSocket 브로드캐스트를 위한 observable 스트림을 제공한다.
+
+### 8.6 ApiServer
+- Express 기반 REST API
+  - `GET /simulation-inputs/recent?limit=50`: 최신 SimulationInput 리스트를 반환.
+  - `GET /health`: 단순 헬스 체크.
+- Socket.IO 게이트웨이
+  - 이벤트 이름 `simulation`으로 실시간 SwapSimulationInput push.
+- REST/WS 모두가 같은 HTTP 서버 위에서 동작하므로, 외부의 MEV 실행 엔진이 손쉽게 구독할 수 있다.
 
 ## 9. 타겟 ABI 
 
@@ -346,3 +335,33 @@ eth-swap-scope/
 [{"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[],"name":"WETH","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"tokenA","type":"address"},{"internalType":"address","name":"tokenB","type":"address"},{"internalType":"uint256","name":"amountADesired","type":"uint256"},{"internalType":"uint256","name":"amountBDesired","type":"uint256"},{"internalType":"uint256","name":"amountAMin","type":"uint256"},{"internalType":"uint256","name":"amountBMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"addLiquidity","outputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"amountB","type":"uint256"},{"internalType":"uint256","name":"liquidity","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"amountTokenDesired","type":"uint256"},{"internalType":"uint256","name":"amountTokenMin","type":"uint256"},{"internalType":"uint256","name":"amountETHMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"addLiquidityETH","outputs":[{"internalType":"uint256","name":"amountToken","type":"uint256"},{"internalType":"uint256","name":"amountETH","type":"uint256"},{"internalType":"uint256","name":"liquidity","type":"uint256"}],"stateMutability":"payable","type":"function"},{"inputs":[],"name":"factory","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"uint256","name":"reserveIn","type":"uint256"},{"internalType":"uint256","name":"reserveOut","type":"uint256"}],"name":"getAmountIn","outputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"}],"stateMutability":"pure","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"reserveIn","type":"uint256"},{"internalType":"uint256","name":"reserveOut","type":"uint256"}],"name":"getAmountOut","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"pure","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"}],"name":"getAmountsIn","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"}],"name":"getAmountsOut","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"reserveA","type":"uint256"},{"internalType":"uint256","name":"reserveB","type":"uint256"}],"name":"quote","outputs":[{"internalType":"uint256","name":"amountB","type":"uint256"}],"stateMutability":"pure","type":"function"},{"inputs":[{"internalType":"address","name":"tokenA","type":"address"},{"internalType":"address","name":"tokenB","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountAMin","type":"uint256"},{"internalType":"uint256","name":"amountBMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"removeLiquidity","outputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"amountB","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountTokenMin","type":"uint256"},{"internalType":"uint256","name":"amountETHMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"removeLiquidityETH","outputs":[{"internalType":"uint256","name":"amountToken","type":"uint256"},{"internalType":"uint256","name":"amountETH","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountTokenMin","type":"uint256"},{"internalType":"uint256","name":"amountETHMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"removeLiquidityETHSupportingFeeOnTransferTokens","outputs":[{"internalType":"uint256","name":"amountETH","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountTokenMin","type":"uint256"},{"internalType":"uint256","name":"amountETHMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"bool","name":"approveMax","type":"bool"},{"internalType":"uint8","name":"v","type":"uint8"},{"internalType":"bytes32","name":"r","type":"bytes32"},{"internalType":"bytes32","name":"s","type":"bytes32"}],"name":"removeLiquidityETHWithPermit","outputs":[{"internalType":"uint256","name":"amountToken","type":"uint256"},{"internalType":"uint256","name":"amountETH","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountTokenMin","type":"uint256"},{"internalType":"uint256","name":"amountETHMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"bool","name":"approveMax","type":"bool"},{"internalType":"uint8","name":"v","type":"uint8"},{"internalType":"bytes32","name":"r","type":"bytes32"},{"internalType":"bytes32","name":"s","type":"bytes32"}],"name":"removeLiquidityETHWithPermitSupportingFeeOnTransferTokens","outputs":[{"internalType":"uint256","name":"amountETH","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"tokenA","type":"address"},{"internalType":"address","name":"tokenB","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountAMin","type":"uint256"},{"internalType":"uint256","name":"amountBMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"bool","name":"approveMax","type":"bool"},{"internalType":"uint8","name":"v","type":"uint8"},{"internalType":"bytes32","name":"r","type":"bytes32"},{"internalType":"bytes32","name":"s","type":"bytes32"}],"name":"removeLiquidityWithPermit","outputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"amountB","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapETHForExactTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactETHForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactETHForTokensSupportingFeeOnTransferTokens","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForETH","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForETHSupportingFeeOnTransferTokens","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokensSupportingFeeOnTransferTokens","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"uint256","name":"amountInMax","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapTokensForExactETH","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"uint256","name":"amountInMax","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapTokensForExactTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"},{"stateMutability":"payable","type":"receive"}]
 ```
 
+## 10. Running & Configuration
+
+### 10.1 Environment Variables
+| Name | Description |
+| --- | --- |
+| `ETH_WS_URL` | 이더리움 노드 WebSocket 엔드포인트 (예: `wss://mainnet.infura.io/ws/v3/<key>`). |
+| `UNISWAP_V2_ROUTER` | 감시 대상 Uniswap V2 Router 주소. |
+| `UNISWAP_V2_FACTORY` | 해당 Router가 사용하는 Factory 주소. |
+| `WATCHED_POOLS` | 콤마 구분 lowercase pair 주소 목록. 비워두면 전체 풀 감시. |
+| `WATCHED_TOKENS` | 콤마 구분 lowercase 토큰 주소 목록. from/to 토큰이 하나라도 속하면 출력. |
+| `SIMULATION_OUTPUT_FILE` | JSONL 결과를 저장할 경로 (기본값 `./data/swap-simulations.jsonl`). |
+| `MAX_RECENT_SIMULATIONS` | 메모리에 유지할 최근 이벤트 개수. |
+| `PIPELINE_CONCURRENCY` | mempool → intent → simulation 처리를 동시에 몇 개까지 수행할지. |
+| `PORT` | Express/Socket.IO 서버 포트. |
+| `DEBUG` | `true`로 설정하면 debug 로그를 활성화. |
+
+### 10.2 Commands
+```bash
+npm install
+ETH_WS_URL=wss://... UNISWAP_V2_ROUTER=0x... UNISWAP_V2_FACTORY=0x... npm run start:dev
+# 또는 프로덕션 빌드
+npm run build && PORT=8080 node dist/main.js
+```
+
+### 10.3 Outputs & Integration Points
+- `./data/swap-simulations.jsonl`: JSON Lines 포맷으로 모든 `SwapSimulationInput`이 누적된다.
+- `GET /simulation-inputs/recent?limit=100`: 최근 이벤트를 REST로 조회.
+- Socket.IO `simulation` 이벤트: 멤풀에서 특정 Intent가 필터링 기준을 통과할 때마다 push. MEV 실행 봇은 이 스트림을 받아 바로 시뮬레이션/번들링으로 이어갈 수 있다.
+
+이 프로젝트는 **EVM 기반 MEV 아비트라지/샌드위치 봇**을 위한 “mempool 구독 + 데이터 정규화” 부분만 담당한다. 다운스트림에서 실제 전략/체결을 구현하면 된다.

@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { Interface, InterfaceAbi } from 'ethers';
 import { EthersService } from '../infra/ethers/ethers.service';
 import { LoggerService } from '../infra/logger/logger.service';
@@ -15,7 +14,6 @@ type TokenMetadata = {
   token1: string;
 };
 
-@Injectable()
 export class UniswapV2PoolStateService {
   private readonly iface = new Interface(PAIR_ABI);
   private readonly tokenCache = new Map<string, TokenMetadata>();

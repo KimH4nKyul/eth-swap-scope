@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { Interface, InterfaceAbi, ZeroAddress } from 'ethers';
 import { ConfigService } from '../config/config.service';
 import { EthersService } from '../infra/ethers/ethers.service';
@@ -14,7 +13,6 @@ const sortTokens = (tokenA: string, tokenB: string): [string, string] => {
     : [tokenB.toLowerCase(), tokenA.toLowerCase()];
 };
 
-@Injectable()
 export class UniswapV2PoolDirectoryService {
   private readonly iface = new Interface(FACTORY_ABI);
   private readonly cache = new Map<string, string | null>();

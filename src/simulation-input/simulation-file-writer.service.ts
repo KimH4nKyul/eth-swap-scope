@@ -1,18 +1,16 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
 import { mkdir, appendFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { ConfigService } from '../config/config.service';
 import { SwapSimulationInput } from '../domain/models/swap-simulation-input.model';
 import { LoggerService } from '../infra/logger/logger.service';
 
-@Injectable()
-export class SimulationFileWriterService implements OnModuleInit {
+export class SimulationFileWriterService {
   constructor(
     private readonly configService: ConfigService,
     private readonly logger: LoggerService,
   ) {}
 
-  async onModuleInit() {
+  async initialize() {
     const filePath = this.configService.outputFile;
     await mkdir(dirname(filePath), { recursive: true });
   }

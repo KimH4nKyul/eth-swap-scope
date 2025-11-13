@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { resolve } from 'node:path';
 
 const DEFAULT_WS_URL = 'ws://localhost:8546';
@@ -32,7 +31,6 @@ const toList = (value?: string): string[] => {
     .filter(Boolean);
 };
 
-@Injectable()
 export class ConfigService {
   readonly ethWsUrl: string;
   readonly uniswapRouterAddress?: string;

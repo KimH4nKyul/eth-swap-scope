@@ -1,4 +1,3 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { TransactionResponse } from 'ethers';
 import { from, of, Subscription } from 'rxjs';
 import { catchError, filter, map, mergeMap } from 'rxjs/operators';
@@ -18,10 +17,7 @@ type IntentWithTx = {
   tx: TransactionResponse;
 };
 
-@Injectable()
-export class SimulationPipelineService
-  implements OnModuleInit, OnModuleDestroy
-{
+export class SimulationPipelineService {
   private subscription?: Subscription;
 
   constructor(
@@ -35,7 +31,7 @@ export class SimulationPipelineService
     private readonly logger: LoggerService,
   ) {}
 
-  onModuleInit() {
+  start() {
     const concurrency = this.configService.pipelineConcurrency;
     this.subscription = this.mempoolService.pendingTransactions$
       .pipe(
@@ -84,7 +80,7 @@ export class SimulationPipelineService
       });
   }
 
-  onModuleDestroy() {
+  stop() {
     this.subscription?.unsubscribe();
     this.subscription = undefined;
   }

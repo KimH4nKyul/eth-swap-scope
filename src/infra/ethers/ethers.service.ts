@@ -1,10 +1,8 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { WebSocketLike, WebSocketProvider } from 'ethers';
 import { ConfigService } from '../../config/config.service';
 import { LoggerService } from '../logger/logger.service';
 
-@Injectable()
-export class EthersService implements OnModuleDestroy {
+export class EthersService {
   private provider?: WebSocketProvider;
 
   constructor(
@@ -51,7 +49,7 @@ export class EthersService implements OnModuleDestroy {
     return provider;
   }
 
-  async onModuleDestroy() {
+  async destroy() {
     if (this.provider) {
       await this.provider.destroy();
       this.provider = undefined;

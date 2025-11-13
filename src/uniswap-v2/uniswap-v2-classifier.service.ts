@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { TransactionDescription, TransactionResponse } from 'ethers';
 
 export type SupportedSwapMethod =
@@ -50,7 +49,6 @@ const normalizePath = (rawPath: unknown): string[] => {
     .filter(Boolean);
 };
 
-@Injectable()
 export class UniswapV2ClassifierService {
   private readonly supported = new Set<SupportedSwapMethod>([
     'swapExactTokensForTokens',

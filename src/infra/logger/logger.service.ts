@@ -1,27 +1,35 @@
-import { Injectable, Logger } from '@nestjs/common';
+type LogLevel = 'log' | 'warn' | 'error' | 'debug';
 
-@Injectable()
+const format = (level: LogLevel, message: string, context?: string) => {
+  const timestamp = new Date().toISOString();
+  const tag = context ? `[${context}]` : '';
+  return `${timestamp} ${level.toUpperCase()} ${tag} ${message}`.trim();
+};
+
 export class LoggerService {
-  private readonly logger = new Logger('SwapScope');
-
   log(message: string, context?: string) {
-    this.logger.log(message, context);
+    console.log(format('log', message, context));
   }
 
   warn(message: string, context?: string) {
-    this.logger.warn(message, context);
+    console.warn(format('warn', message, context));
   }
 
-  error(message: string, trace?: Error, context?: string) {
-    if (trace) {
-      this.logger.error(message, trace.stack, context);
+  error(message: string, error?: Error, context?: string) {
+    const base = format('error', message, context);
+    if (error) {
+      console.error(`${base}\n${error.stack ?? error.message}`);
       return;
     }
 
-    this.logger.error(message, undefined, context);
+    console.error(base);
   }
 
   debug(message: string, context?: string) {
-    this.logger.debug(message, context);
+    if (process.env.DEBUG !== 'true') {
+      return;
+    }
+
+    console.debug(format('debug', message, context));
   }
 }

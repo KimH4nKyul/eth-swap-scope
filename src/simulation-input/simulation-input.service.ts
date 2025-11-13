@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { TransactionResponse } from 'ethers';
 import { ConfigService } from '../config/config.service';
 import { SwapSimulationInput } from '../domain/models/swap-simulation-input.model';
@@ -8,7 +7,6 @@ import { UniswapV2PoolStateService } from '../uniswap-v2/uniswap-v2-pool-state.s
 
 const FEE_RATE = 0.003;
 
-@Injectable()
 export class SimulationInputService {
   constructor(
     private readonly poolStateService: UniswapV2PoolStateService,

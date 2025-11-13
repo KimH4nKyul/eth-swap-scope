@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { TransactionDescription, TransactionResponse } from 'ethers';
 import { ConfigService } from '../config/config.service';
 import { LoggerService } from '../infra/logger/logger.service';
@@ -15,7 +14,6 @@ type IntentContext = {
   classification: SwapClassification;
 };
 
-@Injectable()
 export class UniswapV2Builder {
   constructor(
     private readonly configService: ConfigService,

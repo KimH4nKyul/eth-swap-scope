@@ -1,11 +1,9 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Subject } from 'rxjs';
 import { TransactionResponse, WebSocketProvider } from 'ethers';
 import { EthersService } from '../infra/ethers/ethers.service';
 import { LoggerService } from '../infra/logger/logger.service';
 
-@Injectable()
-export class MempoolService implements OnModuleInit, OnModuleDestroy {
+export class MempoolService {
   private readonly pendingSubject = new Subject<TransactionResponse>();
   readonly pendingTransactions$ = this.pendingSubject.asObservable();
 
@@ -17,7 +15,7 @@ export class MempoolService implements OnModuleInit, OnModuleDestroy {
     private readonly logger: LoggerService,
   ) {}
 
-  onModuleInit() {
+  start() {
     this.provider = this.ethersService.getProvider();
     this.handler = (txHash: string) => {
       void this.handleTxHash(txHash);
@@ -45,7 +43,7 @@ export class MempoolService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  onModuleDestroy() {
+  stop() {
     if (this.provider && this.handler) {
       void this.provider.off('pending', this.handler);
     }
