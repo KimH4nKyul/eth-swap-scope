@@ -63,9 +63,8 @@ export class UniswapV2Builder {
       poolAddress,
       fromToken,
       toToken:
-        context.classification.path[
-          context.classification.path.length - 1
-        ] ?? '',
+        context.classification.path[context.classification.path.length - 1] ??
+        '',
       amountIn: context.classification.amountIn,
       amountOutMin: context.classification.amountOutMin,
       path: context.classification.path,

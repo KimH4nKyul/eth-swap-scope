@@ -1,10 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import {
-  Interface,
-  InterfaceAbi,
-  TransactionDescription,
-} from 'ethers';
-import routerAbi from './uniswap-v2.abi.json' assert { type: 'json' };
+import { Interface, InterfaceAbi, TransactionDescription } from 'ethers';
+import routerAbi from './uniswap-v2.abi.json';
 
 @Injectable()
 export class UniswapV2DecoderService {

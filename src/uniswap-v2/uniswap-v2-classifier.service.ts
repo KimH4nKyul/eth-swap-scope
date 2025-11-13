@@ -28,7 +28,10 @@ const bigintify = (value: unknown): bigint => {
     return BigInt(value);
   }
 
-  if (value && typeof (value as { toString: () => string }).toString === 'function') {
+  if (
+    value &&
+    typeof (value as { toString: () => string }).toString === 'function'
+  ) {
     return BigInt((value as { toString: () => string }).toString());
   }
 
@@ -72,7 +75,7 @@ export class UniswapV2ClassifierService {
     switch (decoded.name as SupportedSwapMethod) {
       case 'swapExactTokensForTokens':
         return {
-          method: decoded.name,
+          method: decoded.name as SupportedSwapMethod,
           path,
           amountIn: bigintify(decoded.args.amountIn ?? decoded.args[0]),
           amountOutMin: bigintify(decoded.args.amountOutMin ?? decoded.args[1]),
@@ -82,7 +85,7 @@ export class UniswapV2ClassifierService {
         };
       case 'swapTokensForExactTokens':
         return {
-          method: decoded.name,
+          method: decoded.name as SupportedSwapMethod,
           path,
           amountIn: bigintify(decoded.args.amountInMax ?? decoded.args[1]),
           amountOutMin: bigintify(decoded.args.amountOut ?? decoded.args[0]),
@@ -92,7 +95,7 @@ export class UniswapV2ClassifierService {
         };
       case 'swapExactETHForTokens':
         return {
-          method: decoded.name,
+          method: decoded.name as SupportedSwapMethod,
           path,
           amountIn: tx.value ?? 0n,
           amountOutMin: bigintify(decoded.args.amountOutMin ?? decoded.args[0]),
@@ -102,7 +105,7 @@ export class UniswapV2ClassifierService {
         };
       case 'swapExactTokensForETH':
         return {
-          method: decoded.name,
+          method: decoded.name as SupportedSwapMethod,
           path,
           amountIn: bigintify(decoded.args.amountIn ?? decoded.args[0]),
           amountOutMin: bigintify(decoded.args.amountOutMin ?? decoded.args[1]),

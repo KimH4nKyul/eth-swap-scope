@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { WebSocketProvider } from 'ethers';
+import { WebSocketLike, WebSocketProvider } from 'ethers';
 import { ConfigService } from '../../config/config.service';
 import { LoggerService } from '../logger/logger.service';
 
@@ -23,13 +23,14 @@ export class EthersService implements OnModuleDestroy {
   }
 
   private createProvider(): WebSocketProvider {
-    const provider = new WebSocketProvider(this.configService.ethWsUrl, undefined, {
-      retryTimeout: 1_000,
-    });
+    const provider = new WebSocketProvider(this.configService.ethWsUrl);
 
-    const ws = provider.websocket as Record<string, unknown>;
+    const ws = provider.websocket as WebSocketLike & {
+      onclose?: (event: unknown) => void;
+      onerror?: (event: unknown) => void;
+    };
     if (ws && 'onclose' in ws) {
-      (ws as { onclose?: (event: unknown) => void }).onclose = (event) => {
+      ws.onclose = (event) => {
         this.logger.warn(
           `WebSocket connection closed (${JSON.stringify(event)})`,
           'EthersService',
@@ -38,7 +39,7 @@ export class EthersService implements OnModuleDestroy {
     }
 
     if (ws && 'onerror' in ws) {
-      (ws as { onerror?: (event: unknown) => void }).onerror = (error) => {
+      ws.onerror = (error) => {
         this.logger.error(
           'WebSocket provider error',
           error instanceof Error ? error : undefined,

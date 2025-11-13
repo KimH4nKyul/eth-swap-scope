@@ -38,8 +38,11 @@ export class UniswapV2PoolStateService {
         data: reserveData,
       });
 
-      const [reserve0, reserve1, blockTimestampLast] =
-        this.iface.decodeFunctionResult('getReserves', rawReserves);
+      const [reserve0Raw, reserve1Raw, blockTimestampLastRaw] =
+        this.iface.decodeFunctionResult(
+          'getReserves',
+          rawReserves,
+        ) as unknown as [bigint, bigint, bigint];
 
       const tokens = await this.resolveTokens(pairAddress);
       if (!tokens) {
@@ -50,9 +53,9 @@ export class UniswapV2PoolStateService {
         address: pairAddress,
         token0: tokens.token0,
         token1: tokens.token1,
-        reserve0: BigInt(reserve0),
-        reserve1: BigInt(reserve1),
-        blockTimestampLast: Number(blockTimestampLast),
+        reserve0: BigInt(reserve0Raw),
+        reserve1: BigInt(reserve1Raw),
+        blockTimestampLast: Number(blockTimestampLastRaw),
       };
     } catch (error) {
       this.logger.error(
@@ -80,12 +83,18 @@ export class UniswapV2PoolStateService {
         provider.call({ to: pairAddress, data: token1Data }),
       ]);
 
-      const [token0] = this.iface.decodeFunctionResult('token0', rawToken0);
-      const [token1] = this.iface.decodeFunctionResult('token1', rawToken1);
+      const [token0Raw] = this.iface.decodeFunctionResult(
+        'token0',
+        rawToken0,
+      ) as unknown as [string];
+      const [token1Raw] = this.iface.decodeFunctionResult(
+        'token1',
+        rawToken1,
+      ) as unknown as [string];
 
       const metadata = {
-        token0: token0.toLowerCase(),
-        token1: token1.toLowerCase(),
+        token0: token0Raw.toLowerCase(),
+        token1: token1Raw.toLowerCase(),
       };
 
       this.tokenCache.set(pairAddress, metadata);

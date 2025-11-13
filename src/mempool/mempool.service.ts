@@ -22,7 +22,7 @@ export class MempoolService implements OnModuleInit, OnModuleDestroy {
     this.handler = (txHash: string) => {
       void this.handleTxHash(txHash);
     };
-    this.provider.on('pending', this.handler);
+    void this.provider.on('pending', this.handler);
     this.logger.log('Subscribed to pending transactions', 'MempoolService');
   }
 
@@ -47,7 +47,7 @@ export class MempoolService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy() {
     if (this.provider && this.handler) {
-      this.provider.off('pending', this.handler);
+      void this.provider.off('pending', this.handler);
     }
 
     this.pendingSubject.complete();

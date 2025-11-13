@@ -48,10 +48,13 @@ export class UniswapV2PoolDirectoryService {
         to: factoryAddress,
         data,
       });
-      const [pairAddress] = this.iface.decodeFunctionResult('getPair', raw);
+      const [pairAddressRaw] = this.iface.decodeFunctionResult(
+        'getPair',
+        raw,
+      ) as unknown as [string];
       const normalized =
-        pairAddress && pairAddress !== ZeroAddress
-          ? pairAddress.toLowerCase()
+        pairAddressRaw && pairAddressRaw !== ZeroAddress
+          ? pairAddressRaw.toLowerCase()
           : null;
 
       this.cache.set(cacheKey, normalized);
